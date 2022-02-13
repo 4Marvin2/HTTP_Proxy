@@ -1,6 +1,7 @@
 package httpProxy
 
 import (
+	"io"
 	"log"
 	"net"
 	"strings"
@@ -9,6 +10,12 @@ import (
 const (
 	Host = "127.0.0.1"
 	Port = "8080"
+)
+
+const BufferSuze = 4096
+const (
+	SlashRCode = 13
+	SlashNCode = 10
 )
 
 func Run() {
@@ -74,16 +81,21 @@ func handleConnection(c net.Conn) {
 func readResponse(c net.Conn) ([]byte, error) {
 	var request []byte
 	contentLength := 0
-	for {
-		buffer := make([]byte, 256)
-		n, err := c.Read(buffer)
-		if err != nil {
+	var err error
+	var n int
+	for err != io.EOF {
+		buffer := make([]byte, BufferSuze)
+		n, err = c.Read(buffer)
+		if err != nil && err != io.EOF {
 			return request, err
 		}
 		contentLength += n
 		request = append(request, buffer...)
-		if n < len(buffer) {
-			request = request[:contentLength]
+		request = request[:contentLength]
+		if request[len(request)-1] == SlashNCode &&
+			request[len(request)-2] == SlashRCode &&
+			request[len(request)-3] == SlashNCode &&
+			request[len(request)-4] == SlashRCode {
 			break
 		}
 	}
