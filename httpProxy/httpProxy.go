@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 )
 
 const (
@@ -61,6 +62,8 @@ func handleConnection(c net.Conn) {
 		return
 	}
 
+	time.Sleep(100 * time.Millisecond)
+
 	response, err := readResponse(rConn)
 	if err != nil {
 		log.Printf("Cannot read data from remote host: %v\n", err)
@@ -92,10 +95,7 @@ func readResponse(c net.Conn) ([]byte, error) {
 		contentLength += n
 		request = append(request, buffer...)
 		request = request[:contentLength]
-		if request[len(request)-1] == SlashNCode &&
-			request[len(request)-2] == SlashRCode &&
-			request[len(request)-3] == SlashNCode &&
-			request[len(request)-4] == SlashRCode {
+		if n < BufferSuze {
 			break
 		}
 	}
