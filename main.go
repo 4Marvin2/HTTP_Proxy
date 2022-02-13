@@ -1,7 +1,7 @@
 package main
 
 import (
-	"proxy/httpproxy"
+	"proxy/httpProxy"
 	"runtime"
 )
 
@@ -11,8 +11,7 @@ const (
 )
 
 func main() {
-	// Просим Go использовать все имеющиеся в системе процессоры.
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	httpproxy.Run()
+	httpProxy.Run()
 }

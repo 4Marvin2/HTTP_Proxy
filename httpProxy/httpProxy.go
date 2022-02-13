@@ -1,7 +1,6 @@
-package httpproxy
+package httpProxy
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"strings"
@@ -29,7 +28,7 @@ func Run() {
 }
 
 func handleConnection(c net.Conn) {
-	fmt.Printf("Serving %s\n", c.RemoteAddr().String())
+	log.Printf("Serving %s\n", c.RemoteAddr().String())
 
 	request, err := readResponse(c)
 	if err != nil {
@@ -99,7 +98,6 @@ func preparationForProxying(request []byte) (string, []byte) {
 	url := firstLine[1]
 
 	parseURL := strings.Split(firstLine[1], "/")
-	fmt.Println(parseURL)
 	protocol := parseURL[0]
 	hostAndPort := parseURL[2]
 	if !strings.Contains(hostAndPort, ":") {
