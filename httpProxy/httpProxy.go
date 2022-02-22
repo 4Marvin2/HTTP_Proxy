@@ -27,45 +27,45 @@ const (
 )
 
 func Run() {
-	// ln, err := net.Listen("tcp", ":"+Port)
-	// if err != nil {
-	// 	log.Fatalf("Unable to start listener, %v\n", err)
-	// }
-	// defer ln.Close()
-	// log.Printf("Start listening on port %s\n", Port)
-	// for {
-	// 	c, err := ln.Accept()
-	// 	if err != nil {
-	// 		log.Printf("Accept connection err: %v\n", err)
-	// 	}
-	// 	go handleConnection(c)
-	// }
-
-	cer, err := tls.LoadX509KeyPair("certs/127.0.0.1.crt", "cert.key")
+	ln, err := net.Listen("tcp", ":"+Port)
 	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	config := &tls.Config{
-		Certificates:       []tls.Certificate{cer},
-		InsecureSkipVerify: true,
-	}
-	ln, err := tls.Listen("tcp", ":8080", config)
-	if err != nil {
-		log.Println(err)
-		return
+		log.Fatalf("Unable to start listener, %v\n", err)
 	}
 	defer ln.Close()
-
+	log.Printf("Start listening on port %s\n", Port)
 	for {
-		conn, err := ln.Accept()
+		c, err := ln.Accept()
 		if err != nil {
-			log.Println(err)
-			continue
+			log.Printf("Accept connection err: %v\n", err)
 		}
-		go handleConnection(conn)
+		go handleConnection(c)
 	}
+
+	// cer, err := tls.LoadX509KeyPair("certs/127.0.0.1.crt", "cert.key")
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return
+	// }
+
+	// config := &tls.Config{
+	// 	Certificates:       []tls.Certificate{cer},
+	// 	InsecureSkipVerify: true,
+	// }
+	// ln, err := tls.Listen("tcp", ":8080", config)
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return
+	// }
+	// defer ln.Close()
+
+	// for {
+	// 	conn, err := ln.Accept()
+	// 	if err != nil {
+	// 		log.Println(err)
+	// 		continue
+	// 	}
+	// 	go handleConnection(conn)
+	// }
 }
 
 func handleConnection(c net.Conn) {
