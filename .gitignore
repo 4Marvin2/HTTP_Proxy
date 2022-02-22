@@ -15,3 +15,7 @@
 # vendor/
 
 /bin
+/certs
+ca.crt
+ca.key
+cert.key
