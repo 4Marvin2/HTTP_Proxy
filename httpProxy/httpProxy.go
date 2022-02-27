@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -14,6 +15,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx"
 )
 
 const (
@@ -21,14 +24,52 @@ const (
 	Port = ":8080"
 )
 
-func Run() {
+const (
+	Username = "marvin"
+	Password = "vbif"
+	DBName   = "http_proxy"
+	DBHost   = "127.0.0.1"
+	DBPort   = "5432"
+)
+
+type Proxy struct {
+	db *pgx.ConnPool
+}
+
+func Init() (*Proxy, error) {
+	ConnStr := fmt.Sprintf("user=%s dbname=%s password=%s host=%s port=%s sslmode=disable",
+		Username,
+		DBName,
+		Password,
+		DBHost,
+		DBPort)
+
+	pgxConnectionConfig, err := pgx.ParseConnectionString(ConnStr)
+	if err != nil {
+		log.Fatalf("Invalid config string: %s", err)
+	}
+
+	pool, err := pgx.NewConnPool(pgx.ConnPoolConfig{
+		ConnConfig:     pgxConnectionConfig,
+		MaxConnections: 100,
+		AfterConnect:   nil,
+		AcquireTimeout: 0,
+	})
+	if err != nil {
+		log.Fatalf("Error %s occurred during connection to database", err)
+	}
+
+	return &Proxy{db: pool}, nil
+}
+
+func (p Proxy) Run() {
 	server := http.Server{
 		Addr: Port,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodConnect {
-				handleHTTPS(w, r)
+				p.handleHTTPS(w, r)
 			} else {
-				handleHTTP(w, r)
+				p.handleHTTP(w, r)
 			}
 		}),
 	}
@@ -36,7 +77,7 @@ func Run() {
 	log.Fatal(server.ListenAndServe())
 }
 
-func handleHTTP(w http.ResponseWriter, r *http.Request) {
+func (p Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	for key := range r.Header {
 		if key == "Proxy-Connection" {
 			r.Header.Del(key)
@@ -61,9 +102,14 @@ func handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	err = p.saveToDB(r, resp)
+	if err != nil {
+		log.Printf("fail save to db: %v", err)
+	}
 }
 
-func handleHTTPS(w http.ResponseWriter, r *http.Request) {
+func (p Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		log.Println("Hijacking not supported")
@@ -88,7 +134,7 @@ func handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 	host := strings.Split(r.Host, ":")[0]
 
-	tlsConfig, err := generateTLSConfig(host, r.URL.Scheme)
+	tlsConfig, err := p.generateTLSConfig(host, r.URL.Scheme)
 	if err != nil {
 		log.Printf("error getting cert: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -155,9 +201,17 @@ func handleHTTPS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	request.URL.Scheme = "https"
+	hostAndPort := strings.Split(r.URL.Host, ":")
+	request.URL.Host = hostAndPort[0]
+	err = p.saveToDB(request, response)
+	if err != nil {
+		log.Printf("fail save to db: %v", err)
+	}
 }
 
-func generateTLSConfig(host string, URL string) (tls.Config, error) {
+func (p Proxy) generateTLSConfig(host string, URL string) (tls.Config, error) {
 	cmd := exec.Command("/bin/sh", "./scripts/gen_cert.sh", host, strconv.Itoa(rand.Intn(math.MaxInt32)))
 
 	err := cmd.Start()
@@ -182,4 +236,44 @@ func generateTLSConfig(host string, URL string) (tls.Config, error) {
 	}
 
 	return tlsConfig, nil
+}
+
+func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
+	insertReqQuery := `INSERT INTO request (method, scheme, address, header, body)
+	values ($1, $2, $3, $4, $5) RETURNING id`
+	var reqId int32
+	reqHeaders := p.headersToString(req.Header)
+	reqBody, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return err
+	}
+	err = p.db.QueryRow(insertReqQuery, req.Method, req.URL.Scheme, req.URL.Host+req.URL.Path, reqHeaders, string(reqBody)).Scan(&reqId)
+	if err != nil {
+		return err
+	}
+
+	insertRespQuery := `INSERT INTO response (req_id, code, resp_message, header, body)
+	values ($1, $2, $3, $4, $5) RETURNING id`
+	var respId int32
+	respHeaders := p.headersToString(resp.Header)
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	err = p.db.QueryRow(insertRespQuery, reqId, resp.StatusCode, resp.Status[4:], respHeaders, respBody).Scan(&respId)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p Proxy) headersToString(headers http.Header) string {
+	var stringHeaders string
+	for key, values := range headers {
+		for _, value := range values {
+			stringHeaders += key + " " + value + "\n"
+		}
+	}
+	return stringHeaders
 }

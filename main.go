@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"proxy/httpProxy"
 	"runtime"
 )
@@ -13,5 +14,11 @@ const (
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	httpProxy.Run()
+	p, err := httpProxy.Init()
+	if err != nil {
+		log.Fatalf("Init proxy error: %v", err)
+		return
+	}
+
+	p.Run()
 }
