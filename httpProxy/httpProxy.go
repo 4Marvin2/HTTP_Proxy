@@ -3,6 +3,7 @@ package httpProxy
 import (
 	"bufio"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,7 +37,7 @@ type Proxy struct {
 	db *pgx.ConnPool
 }
 
-func Init() (*Proxy, error) {
+func Init() *Proxy {
 	ConnStr := fmt.Sprintf("user=%s dbname=%s password=%s host=%s port=%s sslmode=disable",
 		Username,
 		DBName,
@@ -59,7 +60,7 @@ func Init() (*Proxy, error) {
 		log.Fatalf("Error %s occurred during connection to database", err)
 	}
 
-	return &Proxy{db: pool}, nil
+	return &Proxy{db: pool}
 }
 
 func (p Proxy) Run() {
@@ -67,9 +68,9 @@ func (p Proxy) Run() {
 		Addr: Port,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodConnect {
-				p.handleHTTPS(w, r)
+				p.HandleHTTPS(w, r)
 			} else {
-				p.handleHTTP(w, r)
+				p.HandleHTTP(w, r)
 			}
 		}),
 	}
@@ -77,7 +78,7 @@ func (p Proxy) Run() {
 	log.Fatal(server.ListenAndServe())
 }
 
-func (p Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+func (p Proxy) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	for key := range r.Header {
 		if key == "Proxy-Connection" {
 			r.Header.Del(key)
@@ -109,7 +110,7 @@ func (p Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p Proxy) handleHTTPS(w http.ResponseWriter, r *http.Request) {
+func (p Proxy) HandleHTTPS(w http.ResponseWriter, r *http.Request) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		log.Println("Hijacking not supported")
@@ -239,15 +240,20 @@ func (p Proxy) generateTLSConfig(host string, URL string) (tls.Config, error) {
 }
 
 func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
-	insertReqQuery := `INSERT INTO request (method, scheme, address, header, body)
-	values ($1, $2, $3, $4, $5) RETURNING id`
+	insertReqQuery := `INSERT INTO request (method, scheme, host, path, header, body)
+	values ($1, $2, $3, $4, $5, $6) RETURNING id`
 	var reqId int32
-	reqHeaders := p.headersToString(req.Header)
+	reqHeaders, err := json.Marshal(req.Header)
+	if err != nil {
+		return err
+	}
+	fmt.Println(1)
 	reqBody, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		return err
 	}
-	err = p.db.QueryRow(insertReqQuery, req.Method, req.URL.Scheme, req.URL.Host+req.URL.Path, reqHeaders, string(reqBody)).Scan(&reqId)
+	fmt.Println(2)
+	err = p.db.QueryRow(insertReqQuery, req.Method, req.URL.Scheme, req.URL.Host, req.URL.Path, reqHeaders, string(reqBody)).Scan(&reqId)
 	if err != nil {
 		return err
 	}
@@ -255,7 +261,10 @@ func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
 	insertRespQuery := `INSERT INTO response (req_id, code, resp_message, header, body)
 	values ($1, $2, $3, $4, $5) RETURNING id`
 	var respId int32
-	respHeaders := p.headersToString(resp.Header)
+	respHeaders, err := json.Marshal(req.Header)
+	if err != nil {
+		return err
+	}
 	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
@@ -266,14 +275,4 @@ func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
 	}
 
 	return nil
-}
-
-func (p Proxy) headersToString(headers http.Header) string {
-	var stringHeaders string
-	for key, values := range headers {
-		for _, value := range values {
-			stringHeaders += key + " " + value + "\n"
-		}
-	}
-	return stringHeaders
 }

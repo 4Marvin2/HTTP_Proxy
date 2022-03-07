@@ -2,7 +2,8 @@ CREATE TABLE request (
   id SERIAL PRIMARY KEY,
   method text NOT NULL,
   scheme text NOT NULL,
-  address text NOT NULL,
+  host text NOT NULL,
+  path text NOT NULL,
   header text default '',
   body text default '',
   add_time TIMESTAMPTZ default now()

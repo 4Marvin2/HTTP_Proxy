@@ -2,7 +2,9 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"proxy/httpProxy"
+	"proxy/repeater"
 	"runtime"
 )
 
@@ -14,11 +16,20 @@ const (
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	p, err := httpProxy.Init()
-	if err != nil {
-		log.Fatalf("Init proxy error: %v", err)
-		return
+	p := httpProxy.Init()
+
+	go p.Run()
+
+	r := repeater.Init(p)
+
+	apiServer := http.Server{
+		Addr:    ":8000",
+		Handler: r,
 	}
 
-	p.Run()
+	err := apiServer.ListenAndServe()
+
+	if err != nil {
+		log.Fatalf("Failed repeater run: %v", err)
+	}
 }
