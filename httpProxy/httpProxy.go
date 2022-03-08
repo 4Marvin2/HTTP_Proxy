@@ -2,11 +2,13 @@ package httpProxy
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -69,7 +71,7 @@ func (p Proxy) Run() {
 			if r.Method == http.MethodConnect {
 				p.HandleHTTPS(w, r)
 			} else {
-				p.HandleHTTP(w, r)
+				p.HandleHTTP(w, r, false)
 			}
 		}),
 	}
@@ -77,19 +79,35 @@ func (p Proxy) Run() {
 	log.Fatal(server.ListenAndServe())
 }
 
-func (p Proxy) HandleHTTP(w http.ResponseWriter, r *http.Request) {
+func (p Proxy) HandleHTTP(w http.ResponseWriter, r *http.Request, dirbuster bool) *http.Response {
 	for key := range r.Header {
 		if key == "Proxy-Connection" {
 			r.Header.Del(key)
 		}
 	}
 
+	reqId, err := p.saveReqToDB(r)
+	if err != nil {
+		log.Printf("fail save request to db: %v", err)
+	}
+
 	resp, err := http.DefaultTransport.RoundTrip(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
+		return nil
 	}
 	defer resp.Body.Close()
+
+	err = p.saveRespToDB(resp, reqId)
+	if err != nil {
+		log.Printf("fail save response to db: %v", err)
+	}
+
+	if dirbuster && resp.StatusCode == http.StatusNotFound {
+		return nil
+	} else if dirbuster {
+		return resp
+	}
 
 	for key, values := range resp.Header {
 		for _, value := range values {
@@ -100,13 +118,10 @@ func (p Proxy) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil
 	}
 
-	err = p.saveToDB(r, resp)
-	if err != nil {
-		log.Printf("fail save to db: %v", err)
-	}
+	return resp
 }
 
 func (p Proxy) HandleHTTPS(w http.ResponseWriter, r *http.Request) {
@@ -205,9 +220,13 @@ func (p Proxy) HandleHTTPS(w http.ResponseWriter, r *http.Request) {
 	request.URL.Scheme = "https"
 	hostAndPort := strings.Split(r.URL.Host, ":")
 	request.URL.Host = hostAndPort[0]
-	err = p.saveToDB(request, response)
+	reqId, err := p.saveReqToDB(request)
 	if err != nil {
-		log.Printf("fail save to db: %v", err)
+		log.Printf("fail save request to db: %v", err)
+	}
+	err = p.saveRespToDB(response, reqId)
+	if err != nil {
+		log.Printf("fail save response to db: %v", err)
 	}
 }
 
@@ -238,23 +257,28 @@ func (p Proxy) generateTLSConfig(host string, URL string) (tls.Config, error) {
 	return tlsConfig, nil
 }
 
-func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
+func (p Proxy) saveReqToDB(req *http.Request) (int32, error) {
 	insertReqQuery := `INSERT INTO request (method, scheme, host, path, header, body)
 	values ($1, $2, $3, $4, $5, $6) RETURNING id`
 	var reqId int32
 	reqHeaders, err := json.Marshal(req.Header)
 	if err != nil {
-		return err
+		return -1, err
 	}
-	reqBody, err := json.Marshal(req.Body)
+	reqBody, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		return err
+		return -1, err
 	}
+	req.Body = ioutil.NopCloser(bytes.NewBuffer(reqBody))
 	err = p.db.QueryRow(insertReqQuery, req.Method, req.URL.Scheme, req.URL.Host, req.URL.Path, reqHeaders, string(reqBody)).Scan(&reqId)
 	if err != nil {
-		return err
+		return -1, err
 	}
 
+	return reqId, nil
+}
+
+func (p Proxy) saveRespToDB(resp *http.Response, reqId int32) error {
 	insertRespQuery := `INSERT INTO response (req_id, code, resp_message, header, body)
 	values ($1, $2, $3, $4, $5) RETURNING id`
 	var respId int32
@@ -262,10 +286,11 @@ func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
 	if err != nil {
 		return err
 	}
-	respBody, err := json.Marshal(resp.Body)
+	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
+	resp.Body = ioutil.NopCloser(bytes.NewBuffer(respBody))
 	err = p.db.QueryRow(insertRespQuery, reqId, resp.StatusCode, resp.Status[4:], respHeaders, respBody).Scan(&respId)
 	if err != nil {
 		return err

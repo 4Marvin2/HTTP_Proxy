@@ -16,4 +16,4 @@ docker:
 
 .PHONY: docker-run
 docker-run:
-	docker run -p 8080:8080 --name proxy -t proxy
+	docker run -p 8080:8080 -p 8000:8000 --name proxy -t proxy
