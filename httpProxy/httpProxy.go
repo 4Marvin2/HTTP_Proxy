@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -247,12 +246,10 @@ func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(1)
-	reqBody, err := ioutil.ReadAll(req.Body)
+	reqBody, err := json.Marshal(req.Body)
 	if err != nil {
 		return err
 	}
-	fmt.Println(2)
 	err = p.db.QueryRow(insertReqQuery, req.Method, req.URL.Scheme, req.URL.Host, req.URL.Path, reqHeaders, string(reqBody)).Scan(&reqId)
 	if err != nil {
 		return err
@@ -261,11 +258,11 @@ func (p Proxy) saveToDB(req *http.Request, resp *http.Response) error {
 	insertRespQuery := `INSERT INTO response (req_id, code, resp_message, header, body)
 	values ($1, $2, $3, $4, $5) RETURNING id`
 	var respId int32
-	respHeaders, err := json.Marshal(req.Header)
+	respHeaders, err := json.Marshal(resp.Header)
 	if err != nil {
 		return err
 	}
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := json.Marshal(resp.Body)
 	if err != nil {
 		return err
 	}

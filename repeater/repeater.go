@@ -109,11 +109,7 @@ func (api *Api) RepeatRequest(w http.ResponseWriter, r *http.Request) {
 		Header: jsonHeaders,
 	}
 
-	if savedReq.Scheme == "http" {
-		api.proxy.HandleHTTP(w, req)
-	} else if savedReq.Scheme == "https" {
-		api.proxy.HandleHTTPS(w, req)
-	}
+	api.proxy.HandleHTTP(w, req)
 }
 
 func (api *Api) GetRequest(w http.ResponseWriter, r *http.Request) {
@@ -136,19 +132,7 @@ func (api *Api) GetRequest(w http.ResponseWriter, r *http.Request) {
 	var jsonHeaders http.Header
 	err = json.Unmarshal(byteHeaders, &jsonHeaders)
 
-	req := &http.Request{
-		Method: savedReq.Method,
-		URL: &url.URL{
-			Scheme: savedReq.Scheme,
-			Host:   savedReq.Host,
-			Path:   savedReq.Path,
-		},
-		Body:   ioutil.NopCloser(strings.NewReader(savedReq.Body)),
-		Host:   savedReq.Host,
-		Header: jsonHeaders,
-	}
-
-	bytesReq, err := json.Marshal(req)
+	bytesReq, err := json.Marshal(savedReq)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusNotFound)
